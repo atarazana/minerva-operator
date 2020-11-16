@@ -1,0 +1,24 @@
+# permissions for end users to edit appdefinitions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: appdefinition-editor-role
+rules:
+- apiGroups:
+  - minerva.atarazana
+  resources:
+  - appdefinitions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - minerva.atarazana
+  resources:
+  - appdefinitions/status
+  verbs:
+  - get

@@ -1,0 +1,8 @@
+domain: atarazana
+layout: ansible.sdk.operatorframework.io/v1
+projectName: minerva-operator
+resources:
+- group: minerva
+  kind: AppDefinition
+  version: v1
+version: 3-alpha

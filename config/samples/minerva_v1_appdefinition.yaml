@@ -1,0 +1,6 @@
+apiVersion: minerva.atarazana/v1
+kind: AppDefinition
+metadata:
+  name: appdefinition-sample
+spec:
+  foo: bar

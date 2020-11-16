@@ -1,0 +1,20 @@
+# permissions for end users to view appdefinitions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: appdefinition-viewer-role
+rules:
+- apiGroups:
+  - minerva.atarazana
+  resources:
+  - appdefinitions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - minerva.atarazana
+  resources:
+  - appdefinitions/status
+  verbs:
+  - get
