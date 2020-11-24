@@ -1,0 +1,12 @@
+- name: Execute your roles
+  hosts: localhost
+  roles:
+  - role: appdefinition
+    vars:
+      ansible_operator_meta:
+        name: example-cr
+        namespace: minerva-operator-system
+      size: 2
+      number_of_batteries: 23
+      another_variable: master  
+      

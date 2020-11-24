@@ -1,2 +1,4 @@
 ---
 # defaults file for AppDefinition
+size: 1
+number_of_batteries: 3

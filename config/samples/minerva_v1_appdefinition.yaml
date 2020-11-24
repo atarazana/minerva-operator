@@ -3,4 +3,5 @@ kind: AppDefinition
 metadata:
   name: appdefinition-sample
 spec:
-  foo: bar
+  size: 1
+  numberOfBatteries: 10

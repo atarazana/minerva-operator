@@ -1,7 +1,8 @@
-# Current Operator version
-VERSION ?= 0.0.1
+include settings.sh
+
 # Default bundle image tag
-BUNDLE_IMG ?= controller-bundle:$(VERSION)
+BUNDLE_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-bundle:v$(VERSION)
+FROM_BUNDLE_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-bundle:v$(FROM_VERSION)
 # Options for 'bundle-build'
 ifneq ($(origin CHANNELS), undefined)
 BUNDLE_CHANNELS := --channels=$(CHANNELS)
@@ -11,8 +12,15 @@ BUNDLE_DEFAULT_CHANNEL := --default-channel=$(DEFAULT_CHANNEL)
 endif
 BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 
+# Bundle Index tag
+BUNDLE_INDEX_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-index:v$(VERSION)
+FROM_BUNDLE_INDEX_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-index:v$(FROM_VERSION)
+
+# Catalog default namespace
+CATALOG_NAMESPACE?=olm
+
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= quay.io/$(USERNAME)/$(OPERATOR_IMAGE):v$(VERSION)
 
 all: docker-build
 
@@ -90,3 +98,61 @@ bundle: kustomize
 .PHONY: bundle-build
 bundle-build:
 	docker build -f bundle.Dockerfile -t $(BUNDLE_IMG) .
+
+# Push the bundle image.
+bundle-push: bundle-build
+	docker push $(BUNDLE_IMG)
+
+# Do all the bundle stuff
+bundle-validate: bundle-push
+	operator-sdk bundle validate $(BUNDLE_IMG)
+
+# Do all bundle stuff
+bundle-all: bundle-build bundle-push bundle-validate
+
+# Bundle Index
+# Build bundle by referring to the previous version if FROM_VERSION is defined
+ifndef FROM_VERSION
+  CREATE_BUNDLE_INDEX  := true
+endif
+index-build:
+ifeq ($(CREATE_BUNDLE_INDEX),true)
+	opm -u docker index add --bundles $(BUNDLE_IMG) --tag $(BUNDLE_INDEX_IMG)
+else
+	echo "FROM_VERSION ${FROM_VERSION}"
+	opm -u docker index add --bundles $(BUNDLE_IMG) --from-index $(FROM_BUNDLE_INDEX_IMG) --tag $(BUNDLE_INDEX_IMG)
+endif
+	
+# Push the index
+index-push: index-build
+	docker push $(BUNDLE_INDEX_IMG)
+
+# [DEBUGGING] Export the index (pulls image) to download folder
+index-export:
+	opm index export --index="$(BUNDLE_INDEX_IMG)" --package="$(OPERATOR_NAME)"
+
+# [DEBUGGING] Create a test sqlite db and serves it
+index-registry-serve:
+	opm registry add -b $(FROM_BUNDLE_IMG) -d "test-registry.db"
+	opm registry add -b $(BUNDLE_IMG) -d "test-registry.db"
+	opm registry serve -d "test-registry.db" -p 50051
+
+# [DEMO] Deploy previous index then create a sample subscription then deploy current index
+catalog-deploy-prev: # 1. Install Catalog version 0.0.1
+	sed "s|BUNDLE_INDEX_IMG|$(FROM_BUNDLE_INDEX_IMG)|" ./config/catalog/catalog-source.yaml | kubectl apply -n $(CATALOG_NAMESPACE) -f -
+
+install-operator:    # 2. Install Operator => Create AppService and create sample data
+	kubectl operator install $(OPERATOR_NAME) --create-operator-group -v v$(FROM_VERSION)
+	kubectl operator list
+
+catalog-deploy:      # 3. Upgrade Catalog to version 0.0.2
+	sed "s|BUNDLE_INDEX_IMG|$(BUNDLE_INDEX_IMG)|" ./config/catalog/catalog-source.yaml | kubectl apply -n $(CATALOG_NAMESPACE) -f -
+
+upgrade-operator:    # 4. Upgrade Operator, since it's manual this step approves the install plan. Notice schema upgraded and data migrated!
+	kubectl operator upgrade $(OPERATOR_NAME)
+
+uninstall-operator:  # 5. Clean 1. Unistall Operator and delete AppService object
+	kubectl operator uninstall $(OPERATOR_NAME) --delete-operator-groups
+
+catalog-undeploy:    # 6. Clean 2. Delete Catalog
+	sed "s|BUNDLE_INDEX_IMG|$(BUNDLE_INDEX_IMG)|" ./config/catalog/catalog-source.yaml | kubectl delete -n $(CATALOG_NAMESPACE) -f -

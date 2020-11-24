@@ -84,7 +84,6 @@ For the sake of simplicity I've created script to load environment variables.
 cd ~/operators
 
 cat << 'EOF' > ./settings.sh
-####### export GO111MODULE=on
 
 export APP_NAME=minerva
 export OPERATOR_NAME=${APP_NAME}-operator
@@ -206,14 +205,13 @@ spec:
     replicas: 3
 ```
 
-
 In the case of Minerva the CRD is simple, it comprises the next attributes:
 
 - **enabled**: boolean, mandatory (if `false` the operator should do nothing)
 - **initialized**: boolean (filled by the operator, tells if the resource has been checked and initialized properly)
-- CHANGE THISSSS
+- [TODO]
 
-The next command creates a Golang struct representation of an empty template of CRD and also a Controller (the piece of code in charge of reacting to Kubernetes events of interest to the operator).
+The next command creates an ansible role ... TODO explain
 
 ```sh
 operator-sdk create api --group ${APP_NAME} --version v1 --kind AppDefinition --generate-role
@@ -221,17 +219,15 @@ operator-sdk create api --group ${APP_NAME} --version v1 --kind AppDefinition --
 
 Before messing with the code, CRDs, etc. let me explain briefly what we have generated so far.
 
-* [**./api**](./api): The main file here is `appservice_types.go` it contains the definition of our CRD
+
 * **./config**: Basically contains templates/resources you'll use indirectly when running some targets in the Makefile (customization of descriptors will be done with [kustomize](https://kubernetes-sigs.github.io/kustomize/))
-* **./controllers**: The key file here is `appservice_controller.go` is where the meat is, the operator controller code. The reconciliation loop is here, the Manager setup and Predicates code too.
-* **./hack**: boilerplate.go.txt contains text you want to be inserted in generated file
-* **./Dockerfile**: As you already know an operator needs to run as a container in a Kubernetes cluster... hence we need a Dockerfile. Pay attention to `# Copy the go source` if you need to put code in a different folder you have to add that folder there. 
-* **./go.x**: Normal go modules helper files. If `GO111MODULE` is not set, go modules dependency management won't work. No worries it's already in the `settings.sh` file you created before.
+code. The reconciliation loop is here, the Manager setup and Predicates code too.
+* **./Dockerfile**: As you already know an operator needs to run as a container in a Kubernetes cluster... hence we need a Dockerfile. ...  TODO
+work. No worries it's already in the `settings.sh` file you created before.
 * **./main.go**: Here is where the Manager is created and 
 * **./Makefile**: 
-* **./PROJECT**: 
 
-## Time to init our repo and update .gitignore
+## Time to init our repo and update .gitignore [TODO CHECK]
 
 Open `.gitignore` and add this at the end of the file...
 
@@ -262,67 +258,6 @@ git add *
 git commit -a -m "init"
 ```
 
-## Preparing the test environment
-
-If you try to run tests you should get something like this.
-
-```sh
-...
-Ran 0 of 0 Specs in 0.009 seconds
-FAIL! -- 0 Passed | 0 Failed | 0 Pending | 0 Skipped
---- FAIL: TestAPIs (0.01s)
-FAIL
-coverage: 0.0% of statements
-FAIL	github.com/atarazana/gramola-operator/controllers	0.805s
-FAIL
-make: *** [test] Error 1
-```
-
-Let's fix this.
-
-Open `Makefile` and find this:
-
-```makefile
-# Run tests
-test: generate fmt vet manifests
-	go test ./... -coverprofile cover.out
-```
-
-Substitute with this to help you to install the required binaries/libraries and run the tests using those bins. Basically `Kubernetes` and `etcd` libraries/bins. 
-
-```makefile
-# Prepare Test Env: https://sdk.operatorframework.io/docs/golang/references/env-test-setup/
-# Setup binaries required to run the tests
-# See that it expects the Kubernetes and ETCD version
-K8S_VERSION = v1.18.2
-ETCD_VERSION = v3.4.3
-testbin:
-	curl -sSLo setup_envtest.sh https://raw.githubusercontent.com/kubernetes-sigs/controller-runtime/master/hack/setup-envtest.sh
-	chmod +x setup_envtest.sh
-	./setup_envtest.sh $(K8S_VERSION) $(ETCD_VERSION)
-
-# Run tests
-test: generate fmt vet manifests testbin
-    TESTBIN_DIR=$(pwd)/testbin TEST_ASSET_KUBECTL=${TESTBIN_DIR}/kubectl && \
-	TEST_ASSET_KUBE_APISERVER=${TESTBIN_DIR}/kube-apiserver && \
-	TEST_ASSET_ETCD=${TESTBIN_DIR}/etcd && \
-	go test ./... -coverprofile cover.out
-```
-
-Now get those bins!
-
-```sh
-make testbin
-```
-
-Now you should have these binaries in `./testbin`
-
-- `etcd`
-- `kube-apiserver`
-- `kubectl`
-
-Now if you run `make test` it shouldn't complain anymore.
-
 ## Let's dope the makefile a bit more
 
 Now we're going to replace the Makefile with the next one. I know... we have just changed the test target and now we replace the whole file? Well let's call this an artistic license... or that I'm running out of time writing this guide.
@@ -330,216 +265,7 @@ Now we're going to replace the Makefile with the next one. I know... we have jus
 ```makefile
 include settings.sh
 
-# Default bundle image tag
-BUNDLE_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-bundle:v$(VERSION)
-FROM_BUNDLE_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-bundle:v$(FROM_VERSION)
-# Options for 'bundle-build'
-ifneq ($(origin CHANNELS), undefined)
-BUNDLE_CHANNELS := --channels=$(CHANNELS)
-endif
-ifneq ($(origin DEFAULT_CHANNEL), undefined)
-BUNDLE_DEFAULT_CHANNEL := --default-channel=$(DEFAULT_CHANNEL)
-endif
-BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
-
-# Bundle Index tag
-BUNDLE_INDEX_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-index:v$(VERSION)
-FROM_BUNDLE_INDEX_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-index:v$(FROM_VERSION)
-
-# Catalog default namespace
-CATALOG_NAMESPACE?=olm
-
-# Image URL to use all building/pushing image targets
-IMG ?= quay.io/$(USERNAME)/$(OPERATOR_IMAGE):v$(VERSION)
-# Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
-CRD_OPTIONS ?= "crd:trivialVersions=true"
-
-# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
-ifeq (,$(shell go env GOBIN))
-GOBIN=$(shell go env GOPATH)/bin
-else
-GOBIN=$(shell go env GOBIN)
-endif
-
-all: manager
-
-# Prepare Test Env: https://sdk.operatorframework.io/docs/golang/references/env-test-setup/
-# Setup binaries required to run the tests
-# See that it expects the Kubernetes and ETCD version
-K8S_VERSION = v1.18.2
-ETCD_VERSION = v3.4.3
-testbin:
-	curl -sSLo setup_envtest.sh https://raw.githubusercontent.com/kubernetes-sigs/controller-runtime/master/hack/setup-envtest.sh 
-	chmod +x setup_envtest.sh
-	./setup_envtest.sh $(K8S_VERSION) $(ETCD_VERSION)
-
-# Run tests
-test: generate fmt vet manifests testbin
-    TESTBIN_DIR=$(pwd)/testbin TEST_ASSET_KUBECTL=${TESTBIN_DIR}/kubectl && \
-	TEST_ASSET_KUBE_APISERVER=${TESTBIN_DIR}/kube-apiserver && \
-	TEST_ASSET_ETCD=${TESTBIN_DIR}/etcd && \
-	go test ./... -coverprofile cover.out
-
-# Build manager binary
-manager: generate fmt vet
-	go build -o bin/manager main.go
-
-# Run against the configured Kubernetes cluster in ~/.kube/config
-run: generate fmt vet manifests
-	export DB_SCRIPTS_BASE_DIR=. && go run ./main.go
-
-# Install CRDs into a cluster
-install: manifests kustomize
-	$(KUSTOMIZE) build config/crd | kubectl apply -f -
-
-# Uninstall CRDs from a cluster
-uninstall: manifests kustomize
-	$(KUSTOMIZE) build config/crd | kubectl delete -f -
-
-# Deploy controller in the configured Kubernetes cluster in ~/.kube/config
-deploy: manifests kustomize
-	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default | kubectl apply -f -
-
-# Undeploy controller in the configured Kubernetes cluster in ~/.kube/config
-undeploy: manifests kustomize
-	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default | kubectl delete -f -
-
-# Generate manifests e.g. CRD, RBAC etc.
-manifests: controller-gen
-	$(CONTROLLER_GEN) $(CRD_OPTIONS) rbac:roleName=manager-role webhook paths="./..." output:crd:artifacts:config=config/crd/bases
-
-# Run go fmt against code
-fmt:
-	go fmt ./...
-
-# Run go vet against code
-vet:
-	go vet ./...
-
-# Generate code
-generate: controller-gen
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
-
-# Build the docker image
-docker-build: test
-	docker build . -t ${IMG}
-
-# Push the docker image
-docker-push:
-	docker push ${IMG}
-
-# Run the container using docker
-# Create ./run/ca.crt ./run/server-ca.crt and ./run/token 
-docker-run:
-	docker run -it --rm --entrypoint /bin/bash -v $(shell pwd)/run:/var/run/secrets/kubernetes.io/serviceaccount \
-	  -e KUBERNETES_SERVICE_PORT_HTTPS=6443 \
-	  -e KUBERNETES_SERVICE_PORT=6443 \
-	  -e KUBERNETES_SERVICE_HOST=api.cluster-644b.644b.example.opentlc.com ${IMG}
-
-# find or download controller-gen
-# download controller-gen if necessary
-controller-gen:
-ifeq (, $(shell which controller-gen))
-	@{ \
-	set -e ;\
-	CONTROLLER_GEN_TMP_DIR=$$(mktemp -d) ;\
-	cd $$CONTROLLER_GEN_TMP_DIR ;\
-	go mod init tmp ;\
-	go get sigs.k8s.io/controller-tools/cmd/controller-gen@v0.3.0 ;\
-	rm -rf $$CONTROLLER_GEN_TMP_DIR ;\
-	}
-CONTROLLER_GEN=$(GOBIN)/controller-gen
-else
-CONTROLLER_GEN=$(shell which controller-gen)
-endif
-
-kustomize:
-ifeq (, $(shell which kustomize))
-	@{ \
-	set -e ;\
-	KUSTOMIZE_GEN_TMP_DIR=$$(mktemp -d) ;\
-	cd $$KUSTOMIZE_GEN_TMP_DIR ;\
-	go mod init tmp ;\
-	go get sigs.k8s.io/kustomize/kustomize/v3@v3.5.4 ;\
-	rm -rf $$KUSTOMIZE_GEN_TMP_DIR ;\
-	}
-KUSTOMIZE=$(GOBIN)/kustomize
-else
-KUSTOMIZE=$(shell which kustomize)
-endif
-
-# Generate bundle manifests and metadata, then validate generated files.
-.PHONY: bundle
-bundle: manifests
-	operator-sdk generate kustomize manifests -q
-	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
-	$(KUSTOMIZE) build config/manifests | operator-sdk generate bundle -q --overwrite --version $(VERSION) $(BUNDLE_METADATA_OPTS)
-	operator-sdk bundle validate ./bundle
-
-# Build the bundle image.
-.PHONY: bundle-build
-bundle-build:
-	docker build -f bundle.Dockerfile -t $(BUNDLE_IMG) .
-
-# Push the bundle image.
-bundle-push: bundle-build
-	docker push $(BUNDLE_IMG)
-
-# Do all the bundle stuff
-bundle-validate: bundle-push
-	operator-sdk bundle validate $(BUNDLE_IMG)
-
-# Do all bundle stuff
-bundle-all: bundle-build bundle-push bundle-validate
-
-# Bundle Index
-# Build bundle by referring to the previous version if FROM_VERSION is defined
-ifndef FROM_VERSION
-  CREATE_BUNDLE_INDEX  := true
-endif
-index-build:
-ifeq ($(CREATE_BUNDLE_INDEX),true)
-	opm -u docker index add --bundles $(BUNDLE_IMG) --tag $(BUNDLE_INDEX_IMG)
-else
-	echo "FROM_VERSION ${FROM_VERSION}"
-	opm -u docker index add --bundles $(BUNDLE_IMG) --from-index $(FROM_BUNDLE_INDEX_IMG) --tag $(BUNDLE_INDEX_IMG)
-endif
-	
-# Push the index
-index-push: index-build
-	docker push $(BUNDLE_INDEX_IMG)
-
-# [DEBUGGING] Export the index (pulls image) to download folder
-index-export:
-	opm index export --index="$(BUNDLE_INDEX_IMG)" --package="$(OPERATOR_NAME)"
-
-# [DEBUGGING] Create a test sqlite db and serves it
-index-registry-serve:
-	opm registry add -b $(FROM_BUNDLE_IMG) -d "test-registry.db"
-	opm registry add -b $(BUNDLE_IMG) -d "test-registry.db"
-	opm registry serve -d "test-registry.db" -p 50051
-
-# [DEMO] Deploy previous index then create a sample subscription then deploy current index
-catalog-deploy-prev: # 1. Install Catalog version 0.0.1
-	sed "s|BUNDLE_INDEX_IMG|$(FROM_BUNDLE_INDEX_IMG)|" ./config/catalog/catalog-source.yaml | kubectl apply -n $(CATALOG_NAMESPACE) -f -
-
-install-operator:    # 2. Install Operator => Create AppService and create sample data
-	kubectl operator install $(OPERATOR_NAME) --create-operator-group -v v$(FROM_VERSION)
-	kubectl operator list
-
-catalog-deploy:      # 3. Upgrade Catalog to version 0.0.2
-	sed "s|BUNDLE_INDEX_IMG|$(BUNDLE_INDEX_IMG)|" ./config/catalog/catalog-source.yaml | kubectl apply -n $(CATALOG_NAMESPACE) -f -
-
-upgrade-operator:    # 4. Upgrade Operator, since it's manual this step approves the install plan. Notice schema upgraded and data migrated!
-	kubectl operator upgrade $(OPERATOR_NAME)
-
-uninstall-operator:  # 5. Clean 1. Unistall Operator and delete AppService object
-	kubectl operator uninstall $(OPERATOR_NAME) --delete-operator-groups
-
-catalog-undeploy:    # 6. Clean 2. Delete Catalog
-	sed "s|BUNDLE_INDEX_IMG|$(BUNDLE_INDEX_IMG)|" ./config/catalog/catalog-source.yaml | kubectl delete -n $(CATALOG_NAMESPACE) -f -
+... TODO
 ```
 
 Now let's explain a little what we have changed.
@@ -560,7 +286,9 @@ Now let's explain a little what we have changed.
 - Added targets `index-build`, `index-push`, `index-export` and `index-registry-serve` to handle bundle indexes and the registry databases
 - Added targets `catalog-deploy-prev`, `install-operator`, `catalog-deploy`, `upgrade-operator`, `uninstall-operator` and `catalog-undeploy` to handle the operator catalog and as a whole to run the demonstration for gramola.
 
-> **NOTE:** Take into account that this setup was created for the Gramola Operator demonstration, I say this because you should take it as a source of inspiration and to help you get started not as a one-size-fit-all-kind-of template.
+TODO check all above and match reaality
+
+> **NOTE:** Take into account that this setup was created for a demonstration, I say this because you should take it as a source of inspiration and to help you get started not as a one-size-fit-all-kind-of template.
 
 ## Building v0.0.1
 
@@ -570,139 +298,64 @@ Well it's time to look into the code and make it actually do something. As we ha
 
 Let's get started, let's update the empty CRD and add some attributes.
 
-Open file `./api/v1/appservice_types.go` and look for this.
+Open file `./roles/appdefinition/defaults/main.yml` and look for this.
 
-```go
-// AppService is the Schema for the appservices API
-type AppService struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Spec   AppServiceSpec   `json:"spec,omitempty"`
-	Status AppServiceStatus `json:"status,omitempty"`
-}
-```
-
-As you can see this struct declares a normal Kubernetes object comprising:
-
-* **TypeMeta:** Kind and APIVersion
-* **ObjectMeta:** Name, Labels, Annotations, etc.
-* **Spec:** This is where define the attributes of the *specification* of our CRD
-* **Status:** Here we define the attributes to *status* of the system we're managing from the controller reconciliation loop 
 
 So for instance in this simple example we want to deploy a Memcached cluster and one of the attributes of the specification of the cluster could include `number of replicas` as an attribute, right?
 
 Let's add an attribute called Size, substitute this:
 
-```go
-    // Foo is an example field of AppService. Edit AppService_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+```yaml
+---
+# defaults file for AppDefinition
+foo: bar
 ```
 
 With this:
 
-> **TIP:** You can associate a validation (that will be used by Kubernetes to check if the CR is valid) to the attributes you add to the CRD as in this example: `Minimum=0`. Go [here](https://book.kubebuilder.io/reference/markers/crd-validation.html) for a complete list of validations.
-
-```go
-    // +kubebuilder:validation:Minimum=0
-	// Size is the size of the memcached deployment
-	Size int32 `json:"size"`
+```yaml
+---
+# defaults file for AppDefinition
+size: 1
 ```
 
-Additionally, It would be nice to have a list of Memcached node names in the status. Find this:
+TODO do something related to Status?
 
-```go
-// AppServiceStatus defines the observed state of AppService
-type AppServiceStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-}
+
+# Run the code locally
+
+**Running our role in vacuum?**
+
+Obviously no, we need a Playbook to run our role and check if everything is alright or not. So please, create a new file call it playbook.yaml copy the next content in it and place it in the project folder.
+
+
+. ./settings.sh 
+
+oc describe sa/default -n $PROJECT_NAME
+
+export SA_TOKEN=$(oc get secret $(oc get sa/default -o json -n $PROJECT_NAME | jq -r '.secrets[0].name') -o json | jq -r .data.token | base64 -D)
+
+kubectl --token=${SA_TOKEN} get pod
+
+kubectl --token=${SA_TOKEN} scale deploy/${OPERATOR_NAME}-controller-manager --replicas=0
+
+```yaml
+- name: Execute your roles
+  hosts: localhost
+  roles:
+  - role: repository
+    vars:
+      meta:
+        name: example-cr
+        namespace: archetype-master
+      size: 2
+      another_variable: master
 ```
 
-And replace it with this:
 
-```go
-// AppServiceStatus defines the observed state of AppService
-type AppServiceStatus struct {	
-	// Nodes are the names of the memcached pods
-	Nodes []string `json:"nodes"`
-}
-```
 
-> **IMPORTANT!!!** Every time you change the CRD you have to run `make` it will run `make generate` and the `zz_generated.deepcopy.go` file will be regenerated.
 
-Let's do it now. Save the file and run:
 
-```
-make
-```
-
-Have a look to `./api/v1/zz_generated.deepcopy.go` or run this command to see that the file has changed as a result of running `make generate`.
-
-> **NOTE:** `make generate` will invoke the [**controller-gen**](https://github.com/kubernetes-sigs/controller-tools) utility to update the api/v1alpha1/zz_generated.deepcopy.go. No need to install anything it's all handled by the Makefile.
-
-```sh
-grep "Node" ./api/v1/zz_generated.deepcopy.go
-```
-
-**Notice** the mark `+kubebuilder:subresource:status` that adds a status subresource to the CRD manifest so that the controller can update the CR status without changing the rest of the CR object. ***You don't have to change anything this was done by the `init` command when we generate the scaffold code.***
-
-```go
-// +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
-
-// AppService is the Schema for the appservices API
-type AppService struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Spec   AppServiceSpec   `json:"spec,omitempty"`
-	Status AppServiceStatus `json:"status,omitempty"`
-}
-```
-
-There something else that needs to be generated, the CRD descriptors. So far we have defined the struct in go, but not the YAML representation of that object. This is done with the next makefile target. Please run it:
-
-> **NOTE:** The generated CRD descriptor goes `./config/crd/bases`. Open the descriptor and you'll find `Size` and `Nodes`.
-
-```sh
-make manifests
-```
-
-### Adding some code to our empty Controller
-
-Before adding the code let me explain what it does. Our Controller will run the next reconciliation logic for each AppService CR:
-
-* Create a Memcached Deployment if it doesn’t exist
-* Ensure that the Deployment size is the same as specified by the Memcached CR spec
-* Update the Memcached CR status using the status writer with the names of the Memcached pods
-
-Now maybe you're wondering... **What's the entry point of a Controller? How does it start dealing with events? What events? Does it glow in the dark?**
-
-Let's change the code of our empty controller with this one. Open file `./controllers/appservice_controller.go`
-
-> **NOTE:** If you want to have a look to the original controller of the tutorial go [here](https://raw.githubusercontent.com/operator-framework/operator-sdk/master/example/memcached-operator/memcached_controller.go.tmpl).
-
-```sh
-curl https://raw.githubusercontent.com/atarazana/gramola-operator/master/templates/memcached_controller.go.tmpl | \
-  sed s/example\-inc/${ORGANIZATION}/g | \
-  sed s/cache\.example\.com/${APP_NAME}.${DOMAIN}/g | \
-  sed s/memcached\-operator/${OPERATOR_NAME}/g | \
-  sed s/cachev1alpha1/${APP_NAME}v1/g | \
-  sed s/v1alpha1/v1/g | \
-  sed s/MemcachedReconciler/AppServiceReconciler/g | \
-  sed s/Memcached/AppService/g | \
-  sed s/memcacheds/appservices/g | \
-  sed s/WithValues\(\"memcached\"/WithValues\(\"appservice\"/g | \
-  sed 's/"memcached", "memcached_cr"/"appservice", "appservice_cr"/g' | \
-  sed 's/\([^"]\)memcached\([^"]\)/\1appservice\2/g' > ./controllers/appservice_controller.go 
-```
-
-Let's compile to see if everything is ok.
-
-```sh
-make
-```
 
 Ok, let's have a look to the most interesting parts of the controller and try to answer those caustic questions.
 

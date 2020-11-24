@@ -1,0 +1,9 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: minerva-catalog
+spec:
+  displayName: Minerva Operator
+  publisher: Atarazana Inc.
+  sourceType: grpc
+  image: BUNDLE_INDEX_IMG
