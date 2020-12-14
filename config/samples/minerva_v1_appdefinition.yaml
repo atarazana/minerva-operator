@@ -4,4 +4,3 @@ metadata:
   name: appdefinition-sample
 spec:
   size: 1
-  numberOfBatteries: 10

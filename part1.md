@@ -109,37 +109,6 @@ Load environment:
 . ./settings.sh
 ```
 
-## Create the operator scaffold
-
-We need to create the folder for the template code and change to it.
-
-```sh
-mkdir ${OPERATOR_NAME} && cd ${OPERATOR_NAME} 
-```
-
-We're going to need the environment variables inside the operator folder.
-
-```sh
-mv ../settings.sh .
-```
-
-```sh
-operator-sdk init --plugins=ansible --domain=${ORGANIZATION}
-```
-
-GIT INIT ???????
-
-
-
-You should get something like this... as the suggestion says let's create an api.
-
-```sh
-...
-Next: define a resource with:
-$ operator-sdk create api
-```
-
-
 ##  Setting up a Python virtual environment
 
 I'm using macOS and I found that in order to meet the requirements to run my role I needed to update Python to a level macOS didn't like... so I googled my problem and hit [this](https://sourabhbajaj.com/mac-setup/Python/virtualenv.html) gem.
@@ -160,6 +129,29 @@ To leave the virtual env just deactivate it...
 $ deactivate
 ```
 
+## Create the operator scaffold
+
+We need to create the folder for the template code and change to it.
+
+```sh
+mkdir ${OPERATOR_NAME} && cd ${OPERATOR_NAME} 
+```
+
+We're going to need the environment variables inside the operator folder.
+
+```sh
+mv ../settings.sh .
+```
+
+Let's create the project scafflod using `operator-sdk init`. You should get something like this...
+
+```sh
+$ operator-sdk init --plugins=ansible --domain=${ORGANIZATION}
+Next: define a resource with:
+$ operator-sdk create api
+```
+
+As the suggestion says let's create an api.
 
 ## Create an API
 
@@ -205,42 +197,36 @@ spec:
     replicas: 3
 ```
 
-In the case of Minerva the CRD is simple, it comprises the next attributes:
+In the case of our operator the CRD is simple, it comprises the next attributes:
 
-- **enabled**: boolean, mandatory (if `false` the operator should do nothing)
-- **initialized**: boolean (filled by the operator, tells if the resource has been checked and initialized properly)
-- [TODO]
+- **size**: number of Memcached replicas
 
-The next command creates an ansible role ... TODO explain
+The next command creates an ansible role related to our operator CRD, `AppDefinition`.
 
 ```sh
 operator-sdk create api --group ${APP_NAME} --version v1 --kind AppDefinition --generate-role
 ```
 
-Before messing with the code, CRDs, etc. let me explain briefly what we have generated so far.
+Our role `appdefinition` should be inside `./roles` additionally `watches.yaml` has been updated with the following. As you can see the contents of `watches.yaml` relate `GKV` (Group, Kind and Version) with `role`.
 
+> **NOTE:** Obviously the name `watches` suggests exactly that, our Operator watches different objects and execute roles everytime changes are detected.
 
-* **./config**: Basically contains templates/resources you'll use indirectly when running some targets in the Makefile (customization of descriptors will be done with [kustomize](https://kubernetes-sigs.github.io/kustomize/))
-code. The reconciliation loop is here, the Manager setup and Predicates code too.
-* **./Dockerfile**: As you already know an operator needs to run as a container in a Kubernetes cluster... hence we need a Dockerfile. ...  TODO
-work. No worries it's already in the `settings.sh` file you created before.
-* **./main.go**: Here is where the Manager is created and 
-* **./Makefile**: 
+```yaml
+---
+# Use the 'create api' subcommand to add watches to this file.
+- version: v1
+  group: minerva.atarazana
+  kind: AppDefinition
+  role: appdefinition
+# +kubebuilder:scaffold:watch
 
-## Time to init our repo and update .gitignore [TODO CHECK]
+```
+
+## Time to init our repo and update .gitignore
 
 Open `.gitignore` and add this at the end of the file...
 
 ```text
-# Kubernetes dev env.
-testbin
-
-# Kubernetes run secret
-run
-
-# Debugging
-__debug_bin
-
 # Other
 .DS_Store
 downloaded/
@@ -258,14 +244,169 @@ git add *
 git commit -a -m "init"
 ```
 
-## Let's dope the makefile a bit more
+## Let's add some sugar to the makefile
 
-Now we're going to replace the Makefile with the next one. I know... we have just changed the test target and now we replace the whole file? Well let's call this an artistic license... or that I'm running out of time writing this guide.
+Now we're going to replace the Makefile with the next one.
 
 ```makefile
 include settings.sh
 
-... TODO
+# Default bundle image tag
+BUNDLE_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-bundle:v$(VERSION)
+FROM_BUNDLE_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-bundle:v$(FROM_VERSION)
+# Options for 'bundle-build'
+ifneq ($(origin CHANNELS), undefined)
+BUNDLE_CHANNELS := --channels=$(CHANNELS)
+endif
+ifneq ($(origin DEFAULT_CHANNEL), undefined)
+BUNDLE_DEFAULT_CHANNEL := --default-channel=$(DEFAULT_CHANNEL)
+endif
+BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
+
+# Bundle Index tag
+BUNDLE_INDEX_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-index:v$(VERSION)
+FROM_BUNDLE_INDEX_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-index:v$(FROM_VERSION)
+
+# Catalog default namespace
+CATALOG_NAMESPACE?=olm
+
+# Image URL to use all building/pushing image targets
+IMG ?= quay.io/$(USERNAME)/$(OPERATOR_IMAGE):v$(VERSION)
+
+all: docker-build
+
+# Run against the configured Kubernetes cluster in ~/.kube/config
+run: ansible-operator
+	$(ANSIBLE_OPERATOR) run
+
+# Install CRDs into a cluster
+install: kustomize
+	$(KUSTOMIZE) build config/crd | kubectl apply -f -
+
+# Uninstall CRDs from a cluster
+uninstall: kustomize
+	$(KUSTOMIZE) build config/crd | kubectl delete -f -
+
+# Deploy controller in the configured Kubernetes cluster in ~/.kube/config
+deploy: kustomize
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/default | kubectl apply -f -
+
+# Undeploy controller in the configured Kubernetes cluster in ~/.kube/config
+undeploy: kustomize
+	$(KUSTOMIZE) build config/default | kubectl delete -f -
+
+# Build the docker image
+docker-build:
+	docker build . -t ${IMG}
+
+# Push the docker image
+docker-push:
+	docker push ${IMG}
+
+PATH  := $(PATH):$(PWD)/bin
+SHELL := env PATH=$(PATH) /bin/sh
+OS    = $(shell uname -s | tr '[:upper:]' '[:lower:]')
+ARCH  = $(shell uname -m | sed 's/x86_64/amd64/')
+OSOPER   = $(shell uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/apple-darwin/' | sed 's/linux/linux-gnu/')
+ARCHOPER = $(shell uname -m )
+
+kustomize:
+ifeq (, $(shell which kustomize 2>/dev/null))
+	@{ \
+	set -e ;\
+	mkdir -p bin ;\
+	curl -sSLo - https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v3.5.4/kustomize_v3.5.4_$(OS)_$(ARCH).tar.gz | tar xzf - -C bin/ ;\
+	}
+KUSTOMIZE=$(realpath ./bin/kustomize)
+else
+KUSTOMIZE=$(shell which kustomize)
+endif
+
+ansible-operator:
+ifeq (, $(shell which ansible-operator 2>/dev/null))
+	@{ \
+	set -e ;\
+	mkdir -p bin ;\
+	curl -LO https://github.com/operator-framework/operator-sdk/releases/download/v1.2.0/ansible-operator-v1.2.0-$(ARCHOPER)-$(OSOPER) ;\
+	mv ansible-operator-v1.2.0-$(ARCHOPER)-$(OSOPER) ./bin/ansible-operator ;\
+	chmod +x ./bin/ansible-operator ;\
+	}
+ANSIBLE_OPERATOR=$(realpath ./bin/ansible-operator)
+else
+ANSIBLE_OPERATOR=$(shell which ansible-operator)
+endif
+
+# Generate bundle manifests and metadata, then validate generated files.
+.PHONY: bundle
+bundle: kustomize
+	operator-sdk generate kustomize manifests -q
+	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
+	$(KUSTOMIZE) build config/manifests | operator-sdk generate bundle -q --overwrite --version $(VERSION) $(BUNDLE_METADATA_OPTS)
+	operator-sdk bundle validate ./bundle
+
+# Build the bundle image.
+.PHONY: bundle-build
+bundle-build:
+	docker build -f bundle.Dockerfile -t $(BUNDLE_IMG) .
+
+# Push the bundle image.
+bundle-push: bundle-build
+	docker push $(BUNDLE_IMG)
+
+# Do all the bundle stuff
+bundle-validate: bundle-push
+	operator-sdk bundle validate $(BUNDLE_IMG)
+
+# Do all bundle stuff
+bundle-all: bundle-build bundle-push bundle-validate
+
+# Bundle Index
+# Build bundle by referring to the previous version if FROM_VERSION is defined
+ifndef FROM_VERSION
+  CREATE_BUNDLE_INDEX  := true
+endif
+index-build:
+ifeq ($(CREATE_BUNDLE_INDEX),true)
+	opm -u docker index add --bundles $(BUNDLE_IMG) --tag $(BUNDLE_INDEX_IMG)
+else
+	echo "FROM_VERSION ${FROM_VERSION}"
+	opm -u docker index add --bundles $(BUNDLE_IMG) --from-index $(FROM_BUNDLE_INDEX_IMG) --tag $(BUNDLE_INDEX_IMG)
+endif
+	
+# Push the index
+index-push: index-build
+	docker push $(BUNDLE_INDEX_IMG)
+
+# [DEBUGGING] Export the index (pulls image) to download folder
+index-export:
+	opm index export --index="$(BUNDLE_INDEX_IMG)" --package="$(OPERATOR_NAME)"
+
+# [DEBUGGING] Create a test sqlite db and serves it
+index-registry-serve:
+	opm registry add -b $(FROM_BUNDLE_IMG) -d "test-registry.db"
+	opm registry add -b $(BUNDLE_IMG) -d "test-registry.db"
+	opm registry serve -d "test-registry.db" -p 50051
+
+# [DEMO] Deploy previous index then create a sample subscription then deploy current index
+catalog-deploy-prev: # 1. Install Catalog version 0.0.1
+	sed "s|BUNDLE_INDEX_IMG|$(FROM_BUNDLE_INDEX_IMG)|" ./config/catalog/catalog-source.yaml | kubectl apply -n $(CATALOG_NAMESPACE) -f -
+
+install-operator:    # 2. Install Operator => Create AppService and create sample data
+	kubectl operator install $(OPERATOR_NAME) --create-operator-group -v v$(FROM_VERSION)
+	kubectl operator list
+
+catalog-deploy:      # 3. Upgrade Catalog to version 0.0.2
+	sed "s|BUNDLE_INDEX_IMG|$(BUNDLE_INDEX_IMG)|" ./config/catalog/catalog-source.yaml | kubectl apply -n $(CATALOG_NAMESPACE) -f -
+
+upgrade-operator:    # 4. Upgrade Operator, since it's manual this step approves the install plan. Notice schema upgraded and data migrated!
+	kubectl operator upgrade $(OPERATOR_NAME)
+
+uninstall-operator:  # 5. Clean 1. Unistall Operator and delete AppService object
+	kubectl operator uninstall $(OPERATOR_NAME) --delete-operator-groups
+
+catalog-undeploy:    # 6. Clean 2. Delete Catalog
+	sed "s|BUNDLE_INDEX_IMG|$(BUNDLE_INDEX_IMG)|" ./config/catalog/catalog-source.yaml | kubectl delete -n $(CATALOG_NAMESPACE) -f -
 ```
 
 Now let's explain a little what we have changed.
@@ -286,8 +427,6 @@ Now let's explain a little what we have changed.
 - Added targets `index-build`, `index-push`, `index-export` and `index-registry-serve` to handle bundle indexes and the registry databases
 - Added targets `catalog-deploy-prev`, `install-operator`, `catalog-deploy`, `upgrade-operator`, `uninstall-operator` and `catalog-undeploy` to handle the operator catalog and as a whole to run the demonstration for gramola.
 
-TODO check all above and match reaality
-
 > **NOTE:** Take into account that this setup was created for a demonstration, I say this because you should take it as a source of inspiration and to help you get started not as a one-size-fit-all-kind-of template.
 
 ## Building v0.0.1
@@ -296,14 +435,11 @@ Well it's time to look into the code and make it actually do something. As we ha
 
 ### Defining the CRD (API)
 
-Let's get started, let's update the empty CRD and add some attributes.
+Let's get started, let's update the empty role and add some attributes (kind of CRD definition). 
 
-Open file `./roles/appdefinition/defaults/main.yml` and look for this.
+So for instance in this simple example we want to deploy a Memcached cluster and one of the attributes of the specification of the cluster could include `number of replicas` as an attribute, right? 
 
-
-So for instance in this simple example we want to deploy a Memcached cluster and one of the attributes of the specification of the cluster could include `number of replicas` as an attribute, right?
-
-Let's add an attribute called Size, substitute this:
+Ok, open file `./roles/appdefinition/defaults/main.yml` and add an attribute called `size`, substitute this:
 
 ```yaml
 ---
@@ -319,8 +455,68 @@ With this:
 size: 1
 ```
 
-TODO do something related to Status?
+Let's update the CRD, open `./config/crd/baes/minerva.atarazana_appdefinitions.yaml` and substitute with this.
 
+```yaml
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: appdefinitions.minerva.atarazana
+spec:
+  group: minerva.atarazana
+  names:
+    kind: AppDefinition
+    listKind: AppDefinitionList
+    plural: appdefinitions
+    singular: appdefinition
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: AppDefinition is the Schema for the appdefinitions API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: Spec defines the desired state of AppDefinition
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+            properties:
+              size:
+                description: Size is the size of the memcached deployment
+                format: int32
+                minimum: 0
+                type: integer
+            required:
+            - size
+          status:
+            description: Status defines the observed state of AppDefinition
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+            properties:
+              nodes:
+                description: Nodes are the names of the memcached pods
+                items:
+                  type: string
+                type: array
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+```
 
 # Run the code locally
 
@@ -328,267 +524,93 @@ TODO do something related to Status?
 
 Obviously no, we need a Playbook to run our role and check if everything is alright or not. So please, create a new file call it playbook.yaml copy the next content in it and place it in the project folder.
 
-
+```sh
 . ./settings.sh 
 
 oc describe sa/default -n $PROJECT_NAME
+```
 
+Let's extract the token used by the `default` service account.
+
+```sh
 export SA_TOKEN=$(oc get secret $(oc get sa/default -o json -n $PROJECT_NAME | jq -r '.secrets[0].name') -o json | jq -r .data.token | base64 -D)
+```
 
+Now we can use that token to execute code as the service account will do when we deploy the operator.
+
+```sh
 kubectl --token=${SA_TOKEN} get pod
+```
 
+Before we actually run the role manually and locally let's scale the opertor to zero.
+
+```sh
 kubectl --token=${SA_TOKEN} scale deploy/${OPERATOR_NAME}-controller-manager --replicas=0
-
-```yaml
-- name: Execute your roles
-  hosts: localhost
-  roles:
-  - role: repository
-    vars:
-      meta:
-        name: example-cr
-        namespace: archetype-master
-      size: 2
-      another_variable: master
 ```
-
-
-
-
-
-
-Ok, let's have a look to the most interesting parts of the controller and try to answer those caustic questions.
-
-Let me start from the beginning the entry point of our operator is `main.go`, kind of obvious... Let's have a look to this file.
-
-First have a look to function `init()` here is where we add the APIs we want to use. In this case we're composing a `Scheme` with `clientgoscheme` and our own `gramophonev1`. 
-
-> **NOTE:** For instance if we need OpenShift Routes, we'd add it like this: `utilruntime.Must(routev1.AddToScheme(scheme))`
-
-```go
-func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
-	utilruntime.Must(gramophonev1.AddToScheme(scheme))
-	// +kubebuilder:scaffold:scheme
-}
-```
-
-Now let's have a look to the `main()` function. Here `NewManager()` builds a `Manager` with the scheme we composed on `init()`, and other parameters related to metrics and leader election (relevant when you have more than one replica of the operator).
-
-```go
-func main() {
-	...
-
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:             scheme,
-		MetricsBindAddress: metricsAddr,
-		Port:               9443,
-		LeaderElection:     enableLeaderElection,
-		LeaderElectionID:   "8f00f1eb.atarazana.com",
-	})
-	if err != nil {
-		setupLog.Error(err, "unable to start manager")
-		os.Exit(1)
-	}
-```
-
-Next stop, `SetupWithManager()` this function belongs to the controller where we have defined it under `AppServiceReconciler`. It creates a new controller that will be started by the provided `Manager`. This way the `Controller` is managed by the `Manager` but configured in a method of the `Controller`.
-
-> *NOTE:* The `Controller` is initialized with `Client` and `Scheme` from the Manager.
-
-```go
-	if err = (&controllers.AppServiceReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("AppService"),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "AppService")
-		os.Exit(1)
-	}
-```
-
-Last stop, starting the controller. From the documentation: *“**Start() starts all registered Controllers** and blocks until the Stop channel is closed. **Returns an error if there is an error starting any controller**. If LeaderElection is used, the binary must be exited immediately after this returns, otherwise components that need leader election might continue to run after the leader lock was lost”*
-
-```go
-	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
-		os.Exit(1)
-	}
-}
-```
-
-So far we have answered this question.
-
-* What's the entry point of a Controller? The controller starts when Start() is called in the Manager that manages our Controller.
-
-Now let's have a look to the Controller the manager starts. First we find the struct `AppServiceReconciler` this is filled in `main()` and has a client (Kubernetes client to get/set/... objects), Log (logging utility), Scheme (explained before). 
-
-```go
-...
-// AppServiceReconciler reconciles a AppService object
-type AppServiceReconciler struct {
-	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
-}
-```
-
-Event reconciliation ends up calling this method. This is where the logic of our Controller should be. If it all goes well it returns `ctrl.Result{}, nil` otherwise `ctrl.Result{}, err`.
-
-> **NOTE:** If you have not finished, and need to run the `Reconcile()` function again after some time then you use this:
->
-> ```go
-> return reconcile.Result{
->				RequeueAfter: time.Second,
->				Requeue:      true,
->			}, nil
-> ```
-
-```go
-...
-func (r *AppServiceReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
-	ctx := context.Background()
-	log := r.Log.WithValues("appservice", req.NamespacedName)
-
-	// Fetch the AppService instance
-	appservice := &gramophonev1.AppService{}
-	err := r.Get(ctx, req.NamespacedName, appservice)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			// Request object not found, could have been deleted after reconcile request.
-			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
-			// Return and don't requeue
-			log.Info("AppService resource not found. Ignoring since object must be deleted")
-			return ctrl.Result{}, nil
-		}
-		// Error reading the object - requeue the request.
-		log.Error(err, "Failed to get AppService")
-		return ctrl.Result{}, err
-	}
-
-	...
-
-	// Update status.Nodes if needed
-	if !reflect.DeepEqual(podNames, appservice.Status.Nodes) {
-		appservice.Status.Nodes = podNames
-		err := r.Status().Update(ctx, appservice)
-		if err != nil {
-			log.Error(err, "Failed to update AppService status")
-			return ctrl.Result{}, err
-		}
-	}
-
-	return ctrl.Result{}, nil
-}
-```
-
-Well that's basically a Controller a `Reconcile()` function where you use the Kubernetes client API to create, delete, list, objects. Time for checking the pending questions.
-
-* **How does it start dealing with events?** Whenever there's a new event related to the objects watched the `Reconcile()` method is called.
-
-So there's one more question to answer: What events?
-
-Please have a look to the next piece of code. Do you remember that in `main()` before starting the manager and it's controllers you have to set them up? Well when this is the method called from the main() function to create the controller, set it up and link it to the manager.
-
-```go
-func (r *AppServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr). // creating the linked controller
-		For(&gramophonev1.AppService{}). // Watching AppService events
-		Owns(&appsv1.Deployment{}). // Also watching events from owned Deployments
-		Complete(r)
-}
-```
-
-Let's review the remaining questions:
-
-* **What events?** Events from the operator CRD and other owned objects
-* **Does it glow in the dark?** Not really... your controller could shine... but glow... I wish it did!
 
 #### A note regarding RBAC
 
-As you have learned, or guessed, Operators run as PODs and to do so a Service Account is involved and of course Roles and ClusterRoles should be created and linked with RoleBindings or ClusterRoleBindings respectively.
-
-Since Operator SDK v1.0.0 and the introduction of Makefile all the assets needed related to RBAC are generated for you automatically. To do so kubebuilder underneath will help us to generate the roles from comments like the ones below.
-
-> **NOTE:** Please open `./controllers/appservice_controller.go` and look for `+kubebuilder:rbac` to find them.
-
-```go
-// +kubebuilder:rbac:groups=gramophone.atarazana.com,resources=appservices,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=gramophone.atarazana.com,resources=appservices/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;
-```
-
- According to these smart comments `make manifests` should create `./config/rbac/role.yaml` as follows:
+Role definition is here `./config/rbac/role.yaml` as follows:
 
  ```yaml
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  creationTimestamp: null
   name: manager-role
 rules:
-- apiGroups:
-  - apps
-  resources:
-  - deployments
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - pods
-  verbs:
-  - get
-  - list
-- apiGroups:
-  - gramophone.atarazana.com
-  resources:
-  - appservices
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - gramophone.atarazana.com
-  resources:
-  - appservices/status
-  verbs:
-  - get
-  - patch
-  - update
+  ##
+  ## Base operator rules
+  ##
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+      - pods
+      - pods/exec
+      - pods/log
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - daemonsets
+      - replicasets
+      - statefulsets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  ##
+  ## Rules for minerva.atarazana/v1, Kind: AppDefinition
+  ##
+  - apiGroups:
+      - minerva.atarazana
+    resources:
+      - appdefinitions
+      - appdefinitions/status
+      - appdefinitions/finalizers
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+# +kubebuilder:scaffold:rules
  ```
-
-Try adding this comment and run `make manifests`
-
-```go
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=*
-```
-
-You should see this in `./config/rbac/role.yaml`, then delete the comment and run `make manifest` again.
-
-```yaml
-...
-- apiGroups:
-  - ""
-  resources:
-  - configmaps
-  verbs:
-  - '*'
-...
-```
 
 ## Running v0.0.1 locally
 
@@ -620,7 +642,7 @@ Before running the operator, the CRD must be registered with the Kubernetes apis
 $ make install
 ```
 
-Now it's time to run the code locally, open a second terminal.
+Now it's time to run the code locally.
 
 ```sh
 make run

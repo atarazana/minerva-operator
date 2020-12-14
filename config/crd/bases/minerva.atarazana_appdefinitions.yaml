@@ -33,10 +33,24 @@ spec:
             description: Spec defines the desired state of AppDefinition
             type: object
             x-kubernetes-preserve-unknown-fields: true
+            properties:
+              size:
+                description: Size is the size of the memcached deployment
+                format: int32
+                minimum: 0
+                type: integer
+            required:
+            - size
           status:
             description: Status defines the observed state of AppDefinition
             type: object
             x-kubernetes-preserve-unknown-fields: true
+            properties:
+              nodes:
+                description: Nodes are the names of the memcached pods
+                items:
+                  type: string
+                type: array
         type: object
     served: true
     storage: true
