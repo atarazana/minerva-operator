@@ -1,0 +1,12 @@
+---
+# tasks file for AppDefinition
+- name: start memcached
+  community.kubernetes.k8s:
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: '{{ ansible_operator_meta.name }}-cm'
+        namespace: '{{ ansible_operator_meta.namespace }}'
+      data:
+        pod-name: "{{ ansible_operator_meta.name }}"
