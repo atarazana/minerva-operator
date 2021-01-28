@@ -4,4 +4,9 @@
   group: minerva.atarazana
   kind: AppDefinition
   role: appdefinition
+  watchDependentResources: True
 # +kubebuilder:scaffold:watch
+
+- version: v1
+  kind: Pod
+  role: pod

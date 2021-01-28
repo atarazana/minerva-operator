@@ -116,11 +116,13 @@ I'm using macOS and I found that in order to meet the requirements to run my rol
 So the idea is to create a virtual python environment... bear with me and run this commands inside the project folder.
 
 ```
-$ sudo pip install virtualenv
+$ sudo pip install virtualenv //// esto creo que ya no hace falta...
 $ echo "venv/" >> .gitignore
-$ virtualenv venv
+$ python3 -m venv ./venv
 $ source venv/bin/activate
-(venv) $ pip install ansible ansible-runner ansible-runner-http openshift jmespath
+(venv) $ pip install ansible
+(venv) $ ansible-galaxy install -r requirements.yml
+(venv) $ pip install ansible ansible-runner ansible-runner-http openshift jmespath /// Esto igual no hace falta
 ```
 
 To leave the virtual env just deactivate it...
