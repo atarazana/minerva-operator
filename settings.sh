@@ -16,3 +16,6 @@ export USERNAME=cvicens
 #export VERSION=0.0.1
 export FROM_VERSION=0.0.1
 export VERSION=0.0.2
+
+export CHANNELS=alpha,beta
+export DEFAULT_CHANNEL=beta
