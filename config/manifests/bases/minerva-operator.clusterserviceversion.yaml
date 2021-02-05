@@ -4,6 +4,7 @@ metadata:
   annotations:
     alm-examples: '[]'
     capabilities: Basic Install
+    categories: Other
     operators.operatorframework.io/builder: operator-sdk-v1.2.0
     operators.operatorframework.io/project_layout: ansible.sdk.operatorframework.io/v1
   name: minerva-operator.vX.Y.Z
@@ -12,7 +13,7 @@ spec:
   apiservicedefinitions: {}
   customresourcedefinitions: {}
   description: |
-    A sample operator that deploys Memcached.
+    Minerva was the artisans' and architects' Godess, here just a sample operator that deploys Memcached.
     [Memcached](https://en.wikipedia.org/wiki/Memcached) is a cache system.
     ### This is just a sample operator
     This operator deploy memcached pods by creating a Deployment object. The code of the operator is [here](https://github.com/atarazana/minerva-operator).

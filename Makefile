@@ -156,3 +156,5 @@ uninstall-operator:  # 5. Clean 1. Unistall Operator and delete AppService objec
 
 catalog-undeploy:    # 6. Clean 2. Delete Catalog
 	sed "s|BUNDLE_INDEX_IMG|$(BUNDLE_INDEX_IMG)|" ./config/catalog/catalog-source.yaml | kubectl delete -n $(CATALOG_NAMESPACE) -f -
+
+all-in-one: docker-build docker-push bundle-build bundle-push index-build index-push
