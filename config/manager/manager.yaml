@@ -28,6 +28,8 @@ spec:
           args:
             - "--enable-leader-election"
             - "--leader-election-id=minerva-operator"
+            #- "--max-concurrent-reconciles"
+            #- "3"
           env:
             - name: ANSIBLE_GATHERING
               value: explicit

@@ -30,8 +30,8 @@
               ports:
                 - containerPort: 11211
                   name: memcached
-            - name: exporter
-              image: "quay.io/prometheus/memcached-exporter:v0.7.0"
-              ports:
-                - containerPort: 9150
-                  name: exporter
+            #- name: exporter
+            #  image: "quay.io/prometheus/memcached-exporter:v0.7.0"
+            #  ports:
+            #    - containerPort: 9150
+            #      name: exporter

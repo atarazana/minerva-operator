@@ -1,2 +1,4 @@
 venv/
-old/
+old
+*.old
+downloaded/

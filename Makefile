@@ -2,7 +2,9 @@ include settings.sh
 
 # Default bundle image tag
 BUNDLE_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-bundle:v$(VERSION)
+ifdef FROM_VERSION
 FROM_BUNDLE_IMG ?= quay.io/$(USERNAME)/$(OPERATOR_NAME)-bundle:v$(FROM_VERSION)
+endif
 # Options for 'bundle-build'
 ifneq ($(origin CHANNELS), undefined)
 BUNDLE_CHANNELS := --channels=$(CHANNELS)
@@ -119,7 +121,7 @@ index-build:
 ifeq ($(CREATE_BUNDLE_INDEX),true)
 	opm -u docker index add --bundles $(BUNDLE_IMG) --tag $(BUNDLE_INDEX_IMG)
 else
-	echo "FROM_VERSION ${FROM_VERSION}"
+	echo "FROM_VERSION ${FROM_VERSION} FROM_BUNDLE_INDEX_IMG ${FROM_BUNDLE_INDEX_IMG}"
 	opm -u docker index add --bundles $(BUNDLE_IMG) --from-index $(FROM_BUNDLE_INDEX_IMG) --tag $(BUNDLE_INDEX_IMG)
 endif
 	
@@ -133,7 +135,10 @@ index-export:
 
 # [DEBUGGING] Create a test sqlite db and serves it
 index-registry-serve:
+	rm test-registry.db
+ifdef FROM_BUNDLE_IMG
 	opm registry add -b $(FROM_BUNDLE_IMG) -d "test-registry.db"
+endif
 	opm registry add -b $(BUNDLE_IMG) -d "test-registry.db"
 	opm registry serve -d "test-registry.db" -p 50051
 
@@ -157,4 +162,4 @@ uninstall-operator:  # 5. Clean 1. Unistall Operator and delete AppService objec
 catalog-undeploy:    # 6. Clean 2. Delete Catalog
 	sed "s|BUNDLE_INDEX_IMG|$(BUNDLE_INDEX_IMG)|" ./config/catalog/catalog-source.yaml | kubectl delete -n $(CATALOG_NAMESPACE) -f -
 
-all-in-one: docker-build docker-push bundle-build bundle-push index-build index-push
+all-in-one: docker-build docker-push bundle bundle-build bundle-push index-build index-push

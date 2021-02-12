@@ -41,32 +41,7 @@ spec:
     mediatype: image/svg+xml
   install:
     spec:
-      deployments:
-      - name: minerva-operator-controller-manager
-        spec:
-          replicas: 1
-          selector:
-            matchLabels:
-              control-plane: controller-manager
-          strategy: {}
-          template:
-            metadata:
-              labels:
-                control-plane: controller-manager
-            spec:
-              containers:
-              - args:
-                - --enable-leader-election
-                - --leader-election-id=minerva-operator
-                env:
-                - name: ANSIBLE_GATHERING
-                  value: explicit
-                image: quay.io/cvicens/minerva-operator-image:v0.0.2
-                name: manager
-                resources: {}
-              serviceAccountName: minerva-operator-controller-manager
-              terminationGracePeriodSeconds: 10
-      permissions:
+      clusterPermissions:
       - rules:
         - apiGroups:
           - ""
@@ -115,6 +90,31 @@ spec:
           - update
           - watch
         serviceAccountName: minerva-operator-controller-manager
+      deployments:
+      - name: minerva-operator-controller-manager
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              control-plane: controller-manager
+          strategy: {}
+          template:
+            metadata:
+              labels:
+                control-plane: controller-manager
+            spec:
+              containers:
+              - args:
+                - --enable-leader-election
+                - --leader-election-id=minerva-operator
+                env:
+                - name: ANSIBLE_GATHERING
+                  value: explicit
+                image: quay.io/cvicens/minerva-operator-image:v0.0.2
+                name: manager
+                resources: {}
+              serviceAccountName: minerva-operator-controller-manager
+              terminationGracePeriodSeconds: 10
     strategy: deployment
   installModes:
   - supported: false
@@ -136,4 +136,5 @@ spec:
   provider:
     name: Atarazana Inc.
     url: http://wikipedia.org/minerva
+  replaces: minerva-operator.v0.0.1
   version: 0.0.2
