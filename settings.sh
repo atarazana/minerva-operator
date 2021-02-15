@@ -16,10 +16,10 @@ export USERNAME=cvicens
 # If you go back to 0.0.1 delete ./bundle !!!
 
 # Comment for 0.0.2
-#export VERSION=0.0.1
+export VERSION=0.0.1
 # Uncomment for 0.0.2
-export FROM_VERSION=0.0.1
-export VERSION=0.0.2
+#export FROM_VERSION=0.0.1
+#export VERSION=0.0.2
 
 # Channels
 export CHANNELS=alpha,beta

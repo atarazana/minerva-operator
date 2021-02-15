@@ -18,3 +18,5 @@ venv/
 old
 *.old
 downloaded
+bundle
+test-registry.db
