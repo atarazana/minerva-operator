@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: quay.io/cvicens/minerva-operator-image
-  newTag: v0.0.2
+  newTag: v0.0.1
